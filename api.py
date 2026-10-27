@@ -9,3 +9,6 @@ app.include_router(agent.router)
 @app.get("/")
 def accueil():
     return {"message": "API de chat"}
+@app.get("/health")
+def health():
+    return {"status": "ok"}

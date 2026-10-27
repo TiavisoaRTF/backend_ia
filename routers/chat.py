@@ -9,7 +9,12 @@ from fastapi.responses import StreamingResponse
 load_dotenv()
 
 MODELE = "gemini-3.8-flash"
-client = genai.Client(api_key=os.getenv("GOOGLE_API_KEY"))
+from functools import lru_cache
+
+
+@lru_cache
+def get_client():
+    return genai.Client(api_key=os.getenv("GOOGLE_API_KEY"))
 
 router = APIRouter(prefix="/chat", tags=["chat"])
 
@@ -26,7 +31,7 @@ class Reponse(BaseModel):
 @router.post("", response_model=Reponse)
 async def chat(question: Question):
     try:
-        resultat = await client.aio.models.generate_content(
+        resultat = await get_client().aio.models.generate_content(
             model=MODELE,
             contents=question.texte
         )
