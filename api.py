@@ -1,5 +1,5 @@
 from fastapi import FastAPI
-from routers import chat ,agent
+from routers import chat ,agent,workflow
 
 app = FastAPI()
 
@@ -12,3 +12,5 @@ def accueil():
 @app.get("/health")
 def health():
     return {"status": "ok"}
+
+app.include_router(workflow.router)
