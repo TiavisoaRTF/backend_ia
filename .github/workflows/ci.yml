@@ -1,0 +1,19 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  bonjour:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Dire bonjour
+        run: echo "Le workflow se declenche bien"
+
+      - name: Montrer la machine
+        run: |
+          echo "Date : $(date)"
+          echo "Dossier : $(pwd)"
+          ls -la
