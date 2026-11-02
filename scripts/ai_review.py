@@ -66,13 +66,13 @@ def main():
 
     if not diff.strip():
         print("Diff vide, rien a relire.")
-        return
+        return 0
 
     if len(diff) > MAX_DIFF:
         print(f"Diff trop gros ({len(diff)} caracteres), review ignoree.")
-        return
+        return 0
 
-        texte = demander_review(diff)
+    texte = demander_review(diff)
     poster_commentaire(texte)
     print("Review postee.")
 
@@ -80,7 +80,6 @@ def main():
         print("Des problemes HIGH subsistent : merge bloque.")
         return 1
     return 0
-
 
 if __name__ == "__main__":
     try:
