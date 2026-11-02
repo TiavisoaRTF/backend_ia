@@ -1,11 +1,13 @@
+import json
 import os
 import subprocess
 import sys
-import json
+
 import httpx
 from groq import Groq
 
 MAX_DIFF = 50_000
+NIVEAUX_BLOQUANTS = {"CRITICAL", "HIGH"}
 
 
 def recuperer_diff(base):
@@ -23,7 +25,7 @@ def demander_review(diff):
     if not cle:
         raise RuntimeError("GROQ_API_KEY n'est pas definie")
 
-    client = Groq(api_key=cle)
+    client = Groq(api_key=cle, timeout=60)
 
     consigne = (
         "Tu fais une revue de code sur une pull request Python (FastAPI).\n"
@@ -32,8 +34,12 @@ def demander_review(diff):
         "Reponds UNIQUEMENT avec un objet JSON valide, sans texte autour :\n"
         '{"problemes": [{"severite": "CRITICAL|HIGH|MEDIUM|LOW", '
         '"categorie": "securite|logique|performance", '
-        '"fichier": "chemin", "message": "explication", '
+        '"fichier": "chemin exact tel qu il apparait dans le diff", '
+        '"ligne": 42, '
+        '"message": "explication", '
         '"suggestion": "correction"}]}\n\n'
+        "ligne : numero de ligne dans le NOUVEAU fichier, deduit des en-tetes "
+        "@@ du diff. Uniquement une ligne ajoutee (prefixe +).\n\n"
         'Si aucun probleme : {"problemes": []}\n\n'
         "CRITICAL : faille exploitable ou perte de donnees.\n"
         "HIGH : bug certain ou secret expose.\n\n"
@@ -48,36 +54,95 @@ def demander_review(diff):
         max_tokens=1500,
         response_format={"type": "json_object"},
     )
-    return json.loads(reponse.choices[0].message.content)
+
+    try:
+        resultat = json.loads(reponse.choices[0].message.content)
+    except (json.JSONDecodeError, TypeError):
+        print("Reponse non-JSON du modele.")
+        return {"problemes": []}
+
+    if not isinstance(resultat, dict):
+        return {"problemes": []}
+    return resultat
+
 
 def formater(problemes):
     if not problemes:
         return "Aucun probleme detecte."
 
-    lignes = []
+    blocs = []
     for p in problemes:
-        lignes.append(
-            f"**[{p['severite']} - {p['categorie']}]** `{p.get('fichier', '')}`\n\n"
-            f"{p['message']}\n\n"
-            f"*Suggestion :* {p['suggestion']}\n"
+        blocs.append(
+            f"**[{p.get('severite', '?')} - {p.get('categorie', '?')}]** "
+            f"`{p.get('fichier', '')}`\n\n"
+            f"{p.get('message', '')}\n\n"
+            f"*Suggestion :* {p.get('suggestion', '')}\n"
         )
-    return "\n---\n\n".join(lignes)
+    return "\n---\n\n".join(blocs)
+
+
+def entetes():
+    return {
+        "Authorization": f"Bearer {os.environ['GITHUB_TOKEN']}",
+        "Accept": "application/vnd.github+json",
+    }
+
 
 def poster_commentaire(texte):
     depot = os.environ["GITHUB_REPOSITORY"]
     numero = os.environ["PR_NUMBER"]
-    token = os.environ["GITHUB_TOKEN"]
 
     reponse = httpx.post(
         f"https://api.github.com/repos/{depot}/issues/{numero}/comments",
-        headers={
-            "Authorization": f"Bearer {token}",
-            "Accept": "application/vnd.github+json",
-        },
+        headers=entetes(),
         json={"body": f"## Revue automatique\n\n{texte}"},
         timeout=30,
     )
     reponse.raise_for_status()
+
+
+def poster_review(problemes):
+    depot = os.environ["GITHUB_REPOSITORY"]
+    numero = os.environ["PR_NUMBER"]
+
+    commentaires = []
+    orphelins = []
+
+    for p in problemes:
+        corps = (
+            f"**[{p.get('severite', '?')} - {p.get('categorie', '?')}]**\n\n"
+            f"{p.get('message', '')}\n\n"
+            f"*Suggestion :* {p.get('suggestion', '')}"
+        )
+        try:
+            ligne = int(p["ligne"])
+        except (KeyError, TypeError, ValueError):
+            ligne = None
+
+        if p.get("fichier") and ligne:
+            commentaires.append({
+                "path": p["fichier"],
+                "line": ligne,
+                "side": "RIGHT",
+                "body": corps,
+            })
+        else:
+            orphelins.append(corps)
+
+    resume = f"## Revue automatique\n\n{len(problemes)} remarque(s)."
+    if orphelins:
+        resume += "\n\n---\n\n" + "\n\n---\n\n".join(orphelins)
+
+    reponse = httpx.post(
+        f"https://api.github.com/repos/{depot}/pulls/{numero}/reviews",
+        headers=entetes(),
+        json={"body": resume, "event": "COMMENT", "comments": commentaires},
+        timeout=30,
+    )
+
+    if reponse.status_code >= 400:
+        print(f"Echec review ligne a ligne : {reponse.text[:300]}")
+        poster_commentaire(formater(problemes))
 
 
 def main():
@@ -85,30 +150,31 @@ def main():
 
     if not diff.strip():
         print("Diff vide, rien a relire.")
-        return
+        return 0
 
     if len(diff) > MAX_DIFF:
         print(f"Diff trop gros ({len(diff)} caracteres), review ignoree.")
-        return
+        return 0
 
     resultat = demander_review(diff)
     problemes = resultat.get("problemes", [])
 
-    poster_commentaire(formater(problemes))
+    if not problemes:
+        poster_commentaire("Aucun probleme detecte.")
+        print("Aucun probleme.")
+        return 0
 
-    bloquants = [p for p in problemes if p.get("severite") in {"CRITICAL", "HIGH"}]
+    poster_review(problemes)
+
+    bloquants = [p for p in problemes if p.get("severite") in NIVEAUX_BLOQUANTS]
 
     if bloquants:
         print(f"{len(bloquants)} probleme(s) CRITICAL/HIGH : merge bloque.")
         return 1
 
-    if not diff.strip():
-        print("Diff vide, rien a relire.")
-        return 0
+    print(f"{len(problemes)} remarque(s), aucune bloquante.")
+    return 0
 
-    if len(diff) > MAX_DIFF:
-        print(f"Diff trop gros ({len(diff)} caracteres), review ignoree.")
-        return 0
 
 if __name__ == "__main__":
     try:
