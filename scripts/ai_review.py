@@ -179,6 +179,9 @@ def main():
 if __name__ == "__main__":
     try:
         sys.exit(main())
+    except RuntimeError as e:
+        print(f"Erreur de configuration : {e}", file=sys.stderr)
+        sys.exit(1)
     except Exception as e:
         print(f"Echec de la review : {e}", file=sys.stderr)
         sys.exit(0)
