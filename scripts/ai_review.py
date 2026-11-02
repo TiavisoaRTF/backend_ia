@@ -72,13 +72,19 @@ def main():
         print(f"Diff trop gros ({len(diff)} caracteres), review ignoree.")
         return
 
-    poster_commentaire(demander_review(diff))
+        texte = demander_review(diff)
+    poster_commentaire(texte)
     print("Review postee.")
+
+    if "[HIGH" in texte:
+        print("Des problemes HIGH subsistent : merge bloque.")
+        return 1
+    return 0
 
 
 if __name__ == "__main__":
     try:
-        main()
+        sys.exit(main())
     except Exception as e:
         print(f"Echec de la review : {e}", file=sys.stderr)
         sys.exit(0)
