@@ -88,6 +88,7 @@ from langchain_core.tools import tool
 from langchain_groq import ChatGroq
 from langgraph.checkpoint.memory import InMemorySaver
 from pydantic import BaseModel
+from functools import lru_cache
 
 load_dotenv()
 
@@ -114,16 +115,20 @@ def solde_conges(nom: str) -> str:
     return f"{nom} dispose de {CONGES[nom]} jours de congés."
 
 
-modele = ChatGroq(
-    model="llama-3.3-70b-versatile",
-    groq_api_key=os.getenv("GROQ_API_KEY")
-)
+@lru_cache
+def get_modele():
+    return ChatGroq(
+        model="...",          # garde exactement tes paramètres
+        groq_api_key=os.getenv("GROQ_API_KEY"),
+    )
 
-agent = create_agent(
-    model=modele,
-    tools=[heure_actuelle, solde_conges],
-    checkpointer=InMemorySaver()
-)
+@lru_cache
+def get_agent():
+    return create_agent(
+        model=get_modele(),
+        tools=[heure_actuelle, solde_conges],
+        checkpointer=InMemorySaver(),
+    )
 
 
 class Question(BaseModel):
@@ -139,10 +144,10 @@ class Reponse(BaseModel):
 async def poser(question: Question):
     config = {"configurable": {"thread_id": question.thread_id}}
     try:
-        resultat = await agent.ainvoke(
-            {"messages": [{"role": "user", "content": question.texte}]},
-            config
-        )
+        resultat = await get_agent().ainvoke(
+        {"messages": [{"role": "user", "content": question.texte}]},
+        config
+      )
     except Exception as e:
         print("TYPE DE L'ERREUR :", type(e))
         raise HTTPException(status_code=503, detail="Modèle indisponible.")
