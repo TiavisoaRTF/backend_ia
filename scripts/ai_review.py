@@ -97,12 +97,22 @@ def main():
     poster_commentaire(formater(problemes))
 
     bloquants = [p for p in problemes if p.get("severite") in {"CRITICAL", "HIGH"}]
-    print(f"{len(problemes)} remarque(s), dont {len(bloquants)} de niveau eleve.")
 
+    if bloquants:
+        print(f"{len(bloquants)} probleme(s) CRITICAL/HIGH : merge bloque.")
+        return 1
+
+    if not diff.strip():
+        print("Diff vide, rien a relire.")
+        return 0
+
+    if len(diff) > MAX_DIFF:
+        print(f"Diff trop gros ({len(diff)} caracteres), review ignoree.")
+        return 0
 
 if __name__ == "__main__":
     try:
-        main()
+        sys.exit(main())
     except Exception as e:
         print(f"Echec de la review : {e}", file=sys.stderr)
         sys.exit(0)
